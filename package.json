@@ -2,8 +2,8 @@
   "name": "linkedin-ai-sales-agent",
   "version": "1.0.0",
   "private": true,
-  "dependencies": {},
+  "description": "ESM-native AI Agent powered by Gemini",
   "scripts": {
-    "build": "echo 'No build step required for ESM-native app' && exit 0"
+    "build": "echo 'No build step required' && exit 0"
   }
 }

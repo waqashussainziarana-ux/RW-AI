@@ -1,0 +1,6 @@
+{
+  "framework": null,
+  "installCommand": "echo 'Skipping install - using browser-native ESM'",
+  "buildCommand": "echo 'Skipping build - using browser-native ESM'",
+  "cleanUrls": true
+}

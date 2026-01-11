@@ -6,13 +6,12 @@
     <title>LinkedIn AI Sales Agent</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        // Critical: Polyfill process globally before any modules load
+        // Critical: Polyfill process globally for browser-native ESM and Gemini SDK
         window.process = {
             env: { API_KEY: "" },
             nextTick: (cb) => setTimeout(cb, 0),
             browser: true
         };
-        // Ensure 'process' is available as a top-level global for SDKs
         var process = window.process;
     </script>
     <script type="importmap">
