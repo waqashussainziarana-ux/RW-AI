@@ -6,12 +6,14 @@
     <title>LinkedIn AI Sales Agent</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        // Critical: Polyfill process before any modules load to prevent "process is not defined" errors
+        // Critical: Polyfill process globally before any modules load
         window.process = {
             env: { API_KEY: "" },
             nextTick: (cb) => setTimeout(cb, 0),
             browser: true
         };
+        // Ensure 'process' is available as a top-level global for SDKs
+        var process = window.process;
     </script>
     <script type="importmap">
 {
@@ -29,7 +31,6 @@
 </head>
 <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
-    <!-- Explicitly use .tsx extension for browser-native ESM environments -->
     <script type="module" src="index.tsx"></script>
 </body>
 </html>
