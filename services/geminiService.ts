@@ -1,53 +1,41 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { Lead, AuditResult, DiscoveryResult } from "../types.ts";
+import { Lead, AuditResult, DiscoveryResult } from "../types";
 
 // Initialize the Gemini client
 const getAIClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
 /**
- * Enhanced Intent Scouter Agent
- * Specifically tuned to find high-intent "frustration" posts and comments on LinkedIn.
+ * Lead Discovery Agent (Intent-Based Search)
+ * Focused on finding people actively asking for Web/SEO help on social platforms.
  */
 export const discoverLeads = async (query: string): Promise<DiscoveryResult[]> => {
   const ai = getAIClient();
   const prompt = `
-    TASK: Actively search for and identify high-intent sales leads on LinkedIn. 
-    QUERY CONTEXT: "${query}"
-
-    TARGET PERSONAS:
-    - Founders, Business Owners, CEOs, CMOs, or Marketing Managers.
-    - Geography: United States, United Kingdom, and European Union only.
-
-    SEARCH INTENT (Look for Frustration Signals):
-    Scour LinkedIn posts, comments, and public threads for users expressing active frustration or complaining about:
-    1. "My website is too slow" or "Google PageSpeed is failing".
-    2. "Our SEO rankings dropped" or "we aren't showing up on Google anymore".
-    3. "The website looks terrible on mobile" or "mobile UX is broken".
-    4. "Need a reliable web developer" because the previous one ghosted or failed.
-    5. "Wasted money on SEO with no results".
-
-    CRITICAL EXCLUSIONS:
-    - ABSOLUTELY EXCLUDE freelance platforms (Upwork, Fiverr, Freelancer, Toptal, etc.).
-    - EXCLUDE "Open to Work" posts or job seekers.
-    - EXCLUDE automated/bot posts.
-
-    REQUIRED OUTPUT FORMAT:
-    Provide a list of 5 real individuals. For each, include:
-    - full_name
-    - title (e.g., "Founder & CEO")
-    - company
-    - linkedin_url (Direct link to the post, comment, or profile)
-    - website (The company's primary domain if identifiable)
-    - industry
-    - country
-    - intent_signal: Quote or summarize the specific frustration expressed (e.g., "Complained in a comment that their site takes 10 seconds to load on mobile")
-    - source_platform: "LinkedIn Post" or "LinkedIn Comment"
-
+    Find 5 individuals or business owners who have recently (last 30 days) expressed interest online in: "${query}".
+    Focus specifically on finding posts, comments, or public profile updates on LinkedIn, Facebook, X (Twitter), or business forums.
+    
+    CRITICAL RULES:
+    1. EXCLUDE all results from freelance marketplaces: Freelancer.com, Upwork, Fiverr, Toptal, or Guru.
+    2. LOOK FOR intent signals: Posts asking for recommendations, complaints about current slow websites, or mentions of starting a new business venture.
+    3. TARGET: US, UK, or EU markets.
+    
+    For each discovery, provide:
+    - Full Name
+    - Job Title
+    - Company Name
+    - LinkedIn URL
+    - Company Website (if mentioned) or likely domain
+    - Industry
+    - Country
+    - intent_signal: A 1-sentence description of the "Interest Signal" (e.g., "Posted in a business group asking for SEO agency recommendations")
+    - source_platform: Where the intent was found (e.g., "LinkedIn Post", "Facebook Group")
+    
     Return the results as a structured JSON array.
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview', // High-reasoning model for complex intent detection
+    model: 'gemini-3-pro-preview',
     contents: prompt,
     config: {
       tools: [{ googleSearch: {} }],
@@ -74,8 +62,7 @@ export const discoverLeads = async (query: string): Promise<DiscoveryResult[]> =
   });
 
   try {
-    const text = response.text;
-    return text ? JSON.parse(text) : [];
+    return JSON.parse(response.text);
   } catch (e) {
     console.error("Failed to parse Discovery results", e);
     return [];
@@ -83,25 +70,24 @@ export const discoverLeads = async (query: string): Promise<DiscoveryResult[]> =
 };
 
 /**
- * Site Auditor Agent - Analyzes specific technical debt
+ * Site Auditor Agent
  */
 export const analyzeWebsite = async (lead: Lead): Promise<AuditResult> => {
   const ai = getAIClient();
   const prompt = `
-    Conduct an expert-level SEO and performance audit of: ${lead.website}
-    
-    Context:
-    - Prospect: ${lead.full_name} (${lead.title})
-    - Company: ${lead.company}
-    - Industry: ${lead.industry}
+    Analyze the following lead's business context and website:
+    URL: ${lead.website}
+    Company: ${lead.company}
+    Industry: ${lead.industry}
+    Role: ${lead.title}
 
-    Identify 3-4 specific business-killing technical flaws. Translate these flaws into "Revenue Risk":
-    - Slow speed -> "Customer Drop-off"
-    - Poor SEO -> "Invisible to Market"
-    - Weak CTAs -> "Wasted Traffic"
-    - Bad Mobile UX -> "Losing 60% of potential buyers"
+    As a Web Dev & SEO Expert working for Rana Waqas, identify 3-4 specific business pain points related to:
+    1. Page Load Speed
+    2. Mobile UX Optimization
+    3. Search Visibility (SEO)
+    4. Conversion Rate Optimization (Missing CTAs)
 
-    Output the analysis in JSON.
+    Avoid technical jargon. Focus on business impact (e.g., "losing customers due to slow mobile experience").
   `;
 
   const response = await ai.models.generateContent({
@@ -114,11 +100,13 @@ export const analyzeWebsite = async (lead: Lead): Promise<AuditResult> => {
         properties: {
           pain_points: {
             type: Type.ARRAY,
-            items: { type: Type.STRING }
+            items: { type: Type.STRING },
+            description: "List of identified business pain points"
           },
           recommendations: {
             type: Type.ARRAY,
-            items: { type: Type.STRING }
+            items: { type: Type.STRING },
+            description: "Suggested high-level improvements"
           },
           severity: {
             type: Type.STRING,
@@ -131,9 +119,7 @@ export const analyzeWebsite = async (lead: Lead): Promise<AuditResult> => {
   });
 
   try {
-    const text = response.text;
-    if (!text) throw new Error("Empty analysis");
-    return JSON.parse(text);
+    return JSON.parse(response.text);
   } catch (e) {
     console.error("Failed to parse AI response", e);
     throw new Error("AI Analysis failed");
@@ -141,24 +127,20 @@ export const analyzeWebsite = async (lead: Lead): Promise<AuditResult> => {
 };
 
 /**
- * Sales Agent - Drafts the high-converting, empathetic outreach
+ * Sales Agent
  */
 export const generateSalesMessage = async (lead: Lead, audit: AuditResult): Promise<string> => {
   const ai = getAIClient();
   const systemInstruction = `
-    You are writing on behalf of Rana Waqas, an elite SEO & Web Performance Specialist.
-    PROMPT ENGINEERING RULES:
-    1. NEVER use generic templates or sales speak (e.g., "I hope this finds you well").
-    2. START with a specific observation about their LinkedIn frustration if provided.
-    3. MENTION one critical flaw found in their site: ${audit.pain_points[0]}.
-    4. OFFER a "2-minute Loom audit" specifically for their role as ${lead.title}.
-    5. TONE: Result-oriented (US), subtle/consultative (UK), or data-driven (EU) depending on their country: ${lead.country}.
+    You are writing on behalf of Rana Waqas, a high-end Web Development & SEO Consultant.
+    Tone: Professional, empathetic, helpful. 
+    Goal: Mention the prospect's specific intent if available, reference their website's mobile/SEO flaw, and offer a free 2-minute audit video.
   `;
 
   const prompt = `
-    Prospect: ${lead.full_name}
-    Frustration signal: ${lead.pain_points || 'General site optimization'}
-    Primary technical flaw: ${audit.pain_points[0]}
+    Generate outreach message to ${lead.full_name} (${lead.title} @ ${lead.company}).
+    Pain points identified: ${audit.pain_points.join(', ')}.
+    Consultative recommendation: ${audit.recommendations[0]}.
   `;
 
   const response = await ai.models.generateContent({
@@ -166,9 +148,9 @@ export const generateSalesMessage = async (lead: Lead, audit: AuditResult): Prom
     contents: prompt,
     config: {
       systemInstruction,
-      temperature: 0.8,
+      temperature: 0.7,
     }
   });
 
-  return response.text || "Failed to generate outreach message.";
+  return response.text || "Drafting error.";
 };

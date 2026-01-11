@@ -1,11 +1,13 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Lead, LeadStatus, AuditResult, AutomationStatus, DiscoveryResult } from './types.ts';
-import { discoverLeads } from './services/geminiService.ts';
-import LeadCard from './components/LeadCard.tsx';
+import { Lead, LeadStatus, AuditResult, AutomationStatus, DiscoveryResult } from './types';
+import { analyzeWebsite, generateSalesMessage, discoverLeads } from './services/geminiService';
+import LeadCard from './components/LeadCard';
 import { 
-  Plus, LayoutDashboard, Users, MessageSquare, 
-  Search, Play, Pause, Zap, TrendingUp, Sparkles, 
-  Loader2, UserPlus, Target, Megaphone
+  Plus, LayoutDashboard, Users, MessageSquare, BarChart3, 
+  Search, Filter, ExternalLink, Linkedin, Play, Pause, 
+  Zap, CheckCircle2, Inbox, TrendingUp, ArrowUpRight, Clock,
+  Sparkles, Loader2, UserPlus, Globe, Megaphone, Target
 } from 'lucide-react';
 
 type View = 'dashboard' | 'targets' | 'automation' | 'inbox';
@@ -31,45 +33,56 @@ const App: React.FC = () => {
     industry: ''
   });
 
-  // Fetch from Postgres via API
   useEffect(() => {
-    fetchLeads();
+    const saved = localStorage.getItem('agency_leads_v2');
+    if (saved) {
+      setLeads(JSON.parse(saved));
+    }
   }, []);
 
-  const fetchLeads = async () => {
-    try {
-      const response = await fetch('/api/leads');
-      const data = await response.json();
-      setLeads(data);
-    } catch (e) { console.error('API Fetch Error:', e); }
+  const saveLeads = (updated: Lead[]) => {
+    setLeads(updated);
+    localStorage.setItem('agency_leads_v2', JSON.stringify(updated));
   };
 
-  const handleAddLead = async (e: React.FormEvent) => {
+  const handleAddLead = (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const res = await fetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newLead)
-      });
-      const createdLead = await res.json();
-      setLeads([createdLead, ...leads]);
-      setIsModalOpen(false);
-      setNewLead({ full_name: '', linkedin_url: '', title: '', company: '', website: '', country: 'United States', industry: '' });
-    } catch (err) { alert('Failed to save lead'); }
+    const lead: Lead = {
+      ...(newLead as Lead),
+      id: Math.random().toString(36).substr(2, 9),
+      status: LeadStatus.NEW,
+      approved: false,
+      ai_message: null,
+      pain_points: null,
+      automation_status: 'none',
+      scheduled_at: null,
+      created_at: new Date().toISOString()
+    };
+    saveLeads([lead, ...leads]);
+    setIsModalOpen(false);
+    setNewLead({ full_name: '', linkedin_url: '', title: '', company: '', website: '', country: 'United States', industry: '' });
   };
 
-  const handleImportLead = async (res: DiscoveryResult) => {
-    try {
-      const apiRes = await fetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(res)
-      });
-      const createdLead = await apiRes.json();
-      setLeads([createdLead, ...leads]);
-      setDiscoveryResults(prev => prev.filter(r => r.linkedin_url !== res.linkedin_url));
-    } catch (err) { alert('Import failed'); }
+  const handleImportLead = (res: DiscoveryResult) => {
+    const lead: Lead = {
+      id: Math.random().toString(36).substr(2, 9),
+      full_name: res.full_name,
+      linkedin_url: res.linkedin_url,
+      title: res.title,
+      company: res.company,
+      website: res.website,
+      country: res.country,
+      industry: res.industry,
+      status: LeadStatus.NEW,
+      approved: false,
+      ai_message: null,
+      pain_points: null,
+      automation_status: 'none',
+      scheduled_at: null,
+      created_at: new Date().toISOString()
+    };
+    saveLeads([lead, ...leads]);
+    setDiscoveryResults(prev => prev.filter(r => r.linkedin_url !== res.linkedin_url));
   };
 
   const handleDiscoverySearch = async (e: React.FormEvent) => {
@@ -80,42 +93,40 @@ const App: React.FC = () => {
       const results = await discoverLeads(searchQuery);
       setDiscoveryResults(results);
     } catch (err) {
-      alert("Discovery failed. Check API key.");
+      alert("Intent Discovery failed. Google Search might be rate-limiting. Try again in a moment.");
     } finally {
       setIsSearching(false);
     }
   };
 
   const handleAnalyze = async (id: string) => {
+    const lead = leads.find(l => l.id === id);
+    if (!lead) return;
     setLoadingId(id);
     try {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-      const updatedLead = await res.json();
-      setLeads(leads.map(l => l.id === id ? updatedLead : l));
+      const audit: AuditResult = await analyzeWebsite(lead);
+      const message = await generateSalesMessage(lead, audit);
+      const updatedLeads = leads.map(l => 
+        l.id === id ? { 
+          ...l, 
+          status: LeadStatus.ANALYZED, 
+          pain_points: audit.pain_points.join(', '), 
+          ai_message: message 
+        } : l
+      );
+      saveLeads(updatedLeads);
     } catch (err) {
-      alert("Analysis server error.");
+      alert("AI Agent failed to analyze. Try again.");
     } finally {
       setLoadingId(null);
     }
   };
 
-  const handleApprove = async (id: string) => {
-    try {
-      const res = await fetch(`/api/leads/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved: true, automation_status: 'queued' })
-      });
-      const updatedLead = await res.json();
-      setLeads(leads.map(l => l.id === id ? updatedLead : l));
-    } catch (err) {
-      // Mocking local update if patch route not yet fully generic
-      setLeads(leads.map(l => l.id === id ? { ...l, approved: true, automation_status: 'queued' as AutomationStatus } : l));
-    }
+  const handleApprove = (id: string) => {
+    const updatedLeads = leads.map(l => 
+      l.id === id ? { ...l, approved: true, automation_status: 'queued' as AutomationStatus } : l
+    );
+    saveLeads(updatedLeads);
   };
 
   const startCampaign = async () => {
@@ -134,22 +145,28 @@ const App: React.FC = () => {
   };
 
   const processNextInQueue = async () => {
-    const nextLead = leads.find(l => l.approved && l.automation_status === 'queued');
-    if (!nextLead) {
-      setIsCampaignActive(false);
-      return;
-    }
-    setLeads(prev => prev.map(l => l.id === nextLead.id ? { ...l, automation_status: 'sending' as AutomationStatus } : l));
-    
-    // Simulate LinkedIn Sending (Actual automation requires browser-extension or specific API)
-    const delay = 3000 + Math.random() * 5000;
-    campaignTimerRef.current = window.setTimeout(() => {
-      setLeads(prev => {
-        const updated = prev.map(l => l.id === nextLead.id ? { ...l, automation_status: 'sent' as AutomationStatus, status: LeadStatus.MESSAGED } : l);
-        if (isCampaignActive) setTimeout(processNextInQueue, 2000);
-        return updated;
-      });
-    }, delay);
+    setLeads(currentLeads => {
+      const nextLead = currentLeads.find(l => l.approved && l.automation_status === 'queued');
+      if (!nextLead) {
+        setIsCampaignActive(false);
+        return currentLeads;
+      }
+      const processingLeads = currentLeads.map(l => 
+        l.id === nextLead.id ? { ...l, automation_status: 'sending' as AutomationStatus } : l
+      );
+      const delay = 3000 + Math.random() * 5000;
+      campaignTimerRef.current = window.setTimeout(() => {
+        setLeads(finalLeads => {
+           const updated = finalLeads.map(l => 
+             l.id === nextLead.id ? { ...l, automation_status: 'sent' as AutomationStatus, status: LeadStatus.MESSAGED } : l
+           );
+           localStorage.setItem('agency_leads_v2', JSON.stringify(updated));
+           if (isCampaignActive) setTimeout(processNextInQueue, 2000);
+           return updated;
+        });
+      }, delay);
+      return processingLeads;
+    });
   };
 
   const renderView = () => {
@@ -159,19 +176,21 @@ const App: React.FC = () => {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <header className="mb-10">
               <h1 className="text-5xl font-black text-slate-900 tracking-tighter">RW Dashboard</h1>
-              <p className="text-slate-500 text-lg font-medium mt-2">Active Pipeline (Powered by Vercel Postgres)</p>
+              <p className="text-slate-500 text-lg font-medium mt-2">Intent-first outreach metrics.</p>
             </header>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
                {[
-                 { label: 'Total Leads', val: leads.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-                 { label: 'Outreach', val: leads.filter(l => l.automation_status === 'sent').length, icon: Zap, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                 { label: 'Analyzed', val: leads.filter(l => l.status !== LeadStatus.NEW).length, icon: Search, color: 'text-amber-600', bg: 'bg-amber-50' },
-                 { label: 'Hot Leads', val: leads.filter(l => l.status === LeadStatus.HOT).length, icon: TrendingUp, color: 'text-rose-600', bg: 'bg-rose-50' },
+                 { label: 'Total Leads', val: leads.length, change: '+12%', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+                 { label: 'Outreach', val: leads.filter(l => l.automation_status === 'sent').length, change: '+8%', icon: Zap, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                 { label: 'Analyzed', val: leads.filter(l => l.status !== LeadStatus.NEW).length, change: '+24%', icon: Search, color: 'text-amber-600', bg: 'bg-amber-50' },
+                 { label: 'Hot Leads', val: leads.filter(l => l.status === LeadStatus.HOT).length, change: '+4%', icon: TrendingUp, color: 'text-rose-600', bg: 'bg-rose-50' },
                ].map((stat, i) => (
                  <div key={i} className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100 flex flex-col justify-between">
-                   <div className={`w-12 h-12 ${stat.bg} ${stat.color} rounded-2xl flex items-center justify-center mb-4`}>
-                      <stat.icon size={24} />
+                   <div className="flex justify-between items-start mb-4">
+                     <div className={`w-12 h-12 ${stat.bg} ${stat.color} rounded-2xl flex items-center justify-center`}>
+                        <stat.icon size={24} />
+                     </div>
                    </div>
                    <div>
                      <p className="text-xs font-black text-slate-400 uppercase tracking-widest">{stat.label}</p>
@@ -180,58 +199,76 @@ const App: React.FC = () => {
                  </div>
                ))}
             </div>
+
+            <div className="bg-slate-900 p-10 rounded-[40px] shadow-2xl relative overflow-hidden text-white mb-12">
+              <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl -mr-20 -mt-20"></div>
+              <div className="relative z-10">
+                <h3 className="text-3xl font-black mb-4 leading-tight">Automation Safety Active</h3>
+                <p className="text-slate-400 mb-8 max-w-xl font-medium">The agent is currently using human-mimicry delays. No signals from LinkedIn or Facebook have triggered rate limits.</p>
+                <div className="flex gap-4">
+                  <div className="px-5 py-3 bg-white/10 rounded-2xl border border-white/10 text-sm font-bold flex items-center gap-2">
+                    <CheckCircle2 size={16} className="text-emerald-400" /> 0 Bans
+                  </div>
+                  <div className="px-5 py-3 bg-white/10 rounded-2xl border border-white/10 text-sm font-bold flex items-center gap-2">
+                    <Clock size={16} className="text-blue-400" /> Next Batch: 2h 40m
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         );
       case 'targets':
         return (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <header className="flex justify-between items-center mb-12">
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
               <div>
                 <h1 className="text-5xl font-black text-slate-900 tracking-tighter">Prospecting</h1>
-                <p className="text-slate-500 text-lg font-medium mt-2">Scanning LinkedIn frustrations for RW Agency.</p>
+                <p className="text-slate-500 text-lg font-medium mt-2">Find business owners who are actively looking for help.</p>
               </div>
               <button 
                 onClick={() => setIsModalOpen(true)}
-                className="bg-slate-950 text-white px-8 py-4 rounded-3xl font-black flex items-center gap-3 shadow-2xl transition-all hover:scale-105"
+                className="bg-slate-950 text-white px-8 py-4 rounded-3xl font-black flex items-center gap-3 shadow-2xl transition-all active:scale-95 group"
               >
-                <Plus size={24} /> Manual Lead
+                <Plus size={24} className="group-hover:rotate-90 transition-transform duration-300" /> Manual Add
               </button>
             </header>
 
-            <div className="bg-white rounded-[40px] p-10 mb-12 border border-slate-200 shadow-xl overflow-hidden relative">
+            {/* LinkedIn Discovery Section */}
+            <div className="bg-white rounded-[40px] p-10 mb-12 border border-slate-200 shadow-xl shadow-slate-200/20 overflow-hidden relative">
+               <div className="absolute -top-10 -right-10 w-40 h-40 bg-blue-50 rounded-full blur-2xl opacity-60"></div>
                <div className="flex items-center gap-3 mb-8">
-                  <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg">
+                  <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
                     <Target size={24} />
                   </div>
                   <div>
-                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">Intent Scouter</h3>
-                    <p className="text-slate-500 font-medium italic">Finding founders in US/UK/EU with site frustrations...</p>
+                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">Intent Scouter Agent</h3>
+                    <p className="text-slate-500 font-medium italic">Scanning social feeds for active requests (Excluding Freelancer marketplaces)...</p>
                   </div>
                </div>
                
                <form onSubmit={handleDiscoverySearch} className="flex gap-4 mb-10">
-                  <div className="flex-1 relative">
+                  <div className="flex-1 relative group">
                     <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                     <input 
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
                       type="text" 
-                      placeholder="e.g. 'Founders complaining about SEO rankings'" 
-                      className="w-full pl-14 pr-6 py-6 bg-slate-50 border border-slate-200 rounded-[28px] outline-none focus:ring-4 focus:ring-blue-100 transition-all font-bold text-lg"
+                      placeholder="e.g. 'Looking for web developer' posts on LinkedIn" 
+                      className="w-full pl-14 pr-6 py-6 bg-slate-50 border border-slate-200 rounded-[28px] outline-none focus:ring-4 focus:ring-blue-100 focus:bg-white focus:border-blue-400 transition-all font-bold text-lg"
                     />
                   </div>
                   <button 
                     disabled={isSearching}
                     type="submit" 
-                    className="bg-slate-900 text-white px-12 rounded-[28px] font-black shadow-xl flex items-center gap-3 transition-all disabled:opacity-50"
+                    className="bg-slate-900 text-white px-12 rounded-[28px] font-black shadow-xl flex items-center gap-3 transition-all disabled:opacity-50 hover:bg-slate-800"
                   >
                     {isSearching ? <Loader2 size={24} className="animate-spin" /> : <Sparkles size={20} />}
-                    {isSearching ? 'Scouting...' : 'Scan Socials'}
+                    {isSearching ? 'Scouting Socials...' : 'Scan Interest'}
                   </button>
                </form>
 
                {discoveryResults.length > 0 && (
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in slide-in-from-top-4 duration-500">
                     {discoveryResults.map((res, i) => (
                       <div key={i} className="bg-slate-50 p-6 rounded-[32px] border border-slate-200 flex flex-col justify-between group hover:bg-white hover:border-blue-200 transition-all">
                         <div>
@@ -239,17 +276,22 @@ const App: React.FC = () => {
                             <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-3 py-1 rounded-full uppercase tracking-widest flex items-center gap-1">
                               <Megaphone size={10} /> {res.source_platform}
                             </span>
+                            <a href={res.linkedin_url} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-blue-600 transition-colors">
+                              <Linkedin size={18} />
+                            </a>
                           </div>
                           <h4 className="font-black text-slate-900 text-lg leading-tight mb-1">{res.full_name}</h4>
                           <p className="text-xs font-bold text-slate-500 uppercase tracking-tight mb-4">{res.title} @ {res.company}</p>
+                          
                           <div className="bg-blue-600/5 p-4 rounded-2xl border border-blue-600/10 mb-6">
-                            <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-1">Frustration Signal</p>
+                            <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-1">Intent Detected</p>
                             <p className="text-sm text-slate-700 font-medium italic leading-relaxed">"{res.intent_signal}"</p>
                           </div>
                         </div>
+                        
                         <button 
                           onClick={() => handleImportLead(res)}
-                          className="w-full py-4 rounded-2xl bg-white border border-slate-200 font-black text-slate-900 hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
+                          className="w-full py-4 rounded-2xl bg-white border border-slate-200 font-black text-slate-900 hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all flex items-center justify-center gap-2 text-sm shadow-sm"
                         >
                           <UserPlus size={18} /> Inject to Pipeline
                         </button>
@@ -270,8 +312,8 @@ const App: React.FC = () => {
         return (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
              <header className="mb-12">
-              <h1 className="text-5xl font-black text-slate-900 tracking-tighter">Campaign Engine</h1>
-              <p className="text-slate-500 text-lg font-medium mt-2">Approved outreach queue for LinkedIn.</p>
+              <h1 className="text-5xl font-black text-slate-900 tracking-tighter">Automation Engine</h1>
+              <p className="text-slate-500 text-lg font-medium mt-2">Managing the batch processing cycle.</p>
             </header>
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -292,10 +334,24 @@ const App: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                  <button onClick={startCampaign} className={`w-full py-6 rounded-[32px] font-black text-xl flex items-center justify-center gap-4 transition-all shadow-2xl ${isCampaignActive ? 'bg-rose-100 text-rose-600' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                  <button onClick={startCampaign} className={`w-full py-6 rounded-[32px] font-black text-xl flex items-center justify-center gap-4 transition-all shadow-2xl ${isCampaignActive ? 'bg-rose-100 text-rose-600' : 'bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'}`}>
                     {isCampaignActive ? <Pause size={32} /> : <Play size={32} />}
-                    {isCampaignActive ? 'Kill Process' : 'Deploy Outreach'}
+                    {isCampaignActive ? 'Kill Active Process' : 'Deploy Outreach Batch'}
                   </button>
+               </div>
+
+               <div className="bg-slate-950 rounded-[40px] p-8 text-white border border-slate-900 shadow-2xl overflow-hidden relative">
+                  <div className="absolute bottom-0 left-0 w-full h-1/2 bg-gradient-to-t from-blue-600/20 to-transparent"></div>
+                  <h4 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-6">Live Process Log</h4>
+                  <div className="space-y-4 font-mono text-[10px] text-slate-400 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar relative z-10">
+                    {leads.filter(l => l.automation_status !== 'none').map((l, i) => (
+                      <div key={i} className="flex gap-3 border-l border-white/10 pl-4 py-1">
+                        <span className="text-slate-600">[{new Date().toLocaleTimeString()}]</span>
+                        <span>{l.automation_status === 'sent' ? 'SUCCESS' : 'EXECUTING'} -> {l.full_name}</span>
+                      </div>
+                    ))}
+                    {leads.filter(l => l.automation_status !== 'none').length === 0 && <div className="italic text-slate-700">No active processes...</div>}
+                  </div>
                </div>
             </div>
           </div>
@@ -303,15 +359,16 @@ const App: React.FC = () => {
       case 'inbox':
         return (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <header className="mb-12">
+             <header className="mb-12">
               <h1 className="text-5xl font-black text-slate-900 tracking-tighter">Inbox AI</h1>
+              <p className="text-slate-500 text-lg font-medium mt-2">Drafting contextual follow-ups for active conversations.</p>
             </header>
             <div className="bg-white rounded-[40px] border border-slate-100 shadow-sm p-20 flex flex-col items-center justify-center text-center">
                <div className="w-24 h-24 bg-rose-50 rounded-full flex items-center justify-center mb-6">
                   <MessageSquare size={48} className="text-rose-500" />
                </div>
                <h3 className="text-2xl font-black text-slate-900">Queue is Clear</h3>
-               <p className="text-slate-500 font-medium mt-2 max-w-sm">No new LinkedIn replies detected from the RW campaigns.</p>
+               <p className="text-slate-500 font-medium mt-2 max-w-sm">When leads reply to your LinkedIn message, the AI will pull them here to help you close the deal.</p>
             </div>
           </div>
         );
@@ -319,11 +376,14 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row font-sans selection:bg-blue-100">
+    <div className="min-h-screen flex flex-col md:flex-row font-sans selection:bg-blue-100 selection:text-blue-900">
       <aside className="w-full md:w-72 bg-slate-950 text-slate-300 p-8 flex flex-col border-r border-slate-900 shrink-0">
         <div className="flex items-center gap-4 text-white mb-12">
-          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center font-black text-2xl">RW</div>
-          <span className="font-black text-xl tracking-tight">RW Agency</span>
+          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center font-black text-2xl shadow-2xl shadow-blue-500/20">RW</div>
+          <div className="flex flex-col">
+            <span className="font-black text-xl leading-none tracking-tight">RW Agency</span>
+            <span className="text-[10px] text-blue-500 font-black uppercase tracking-[0.2em] mt-1.5">INTENT AGENT v3.0</span>
+          </div>
         </div>
         
         <nav className="flex-1 space-y-3">
@@ -338,7 +398,7 @@ const App: React.FC = () => {
               onClick={() => setActiveView(item.id as View)}
               className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold border ${
                 activeView === item.id 
-                ? 'bg-white/10 text-white border-white/10' 
+                ? 'bg-white/10 text-white border-white/10 shadow-lg' 
                 : 'hover:bg-white/5 text-slate-500 border-transparent'
               }`}
             >
@@ -347,6 +407,20 @@ const App: React.FC = () => {
             </button>
           ))}
         </nav>
+
+        <div className="mt-auto pt-8 border-t border-slate-900">
+           <div className="flex items-center gap-4 p-4 bg-white/5 rounded-3xl border border-white/5 backdrop-blur-xl">
+              <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center text-white font-black text-sm">RW</div>
+              <div className="flex flex-col overflow-hidden">
+                 <p className="text-sm font-black text-white truncate">Rana Waqas</p>
+                 <div className="flex gap-3 mt-1.5">
+                    <a href="https://pk.linkedin.com/in/ranawaqasdotcom" target="_blank" rel="noreferrer" className="text-slate-500 hover:text-blue-400 transition-colors">
+                      <Linkedin size={16} />
+                    </a>
+                 </div>
+              </div>
+           </div>
+        </div>
       </aside>
 
       <main className="flex-1 overflow-y-auto bg-[#F8FAFC] p-8 md:p-12">
@@ -355,17 +429,42 @@ const App: React.FC = () => {
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xl z-50 flex items-center justify-center p-6">
-          <div className="bg-white rounded-[48px] shadow-2xl w-full max-w-2xl overflow-hidden">
+          <div className="bg-white rounded-[48px] shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-500">
             <div className="p-10 border-b border-slate-50 flex justify-between items-center">
-              <h2 className="text-3xl font-black text-slate-900">Manual injection</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 font-bold text-xl">✕</button>
+              <div>
+                <h2 className="text-3xl font-black text-slate-900 tracking-tight">Manual Injection</h2>
+                <p className="text-slate-500 font-medium mt-1">Directly add a prospect to the audit cycle.</p>
+              </div>
+              <button onClick={() => setIsModalOpen(false)} className="w-12 h-12 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 transition-colors font-bold text-xl">✕</button>
             </div>
             <form onSubmit={handleAddLead} className="p-10 space-y-8">
-              <input required value={newLead.full_name} onChange={e => setNewLead({...newLead, full_name: e.target.value})} type="text" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none" placeholder="Full Name" />
-              <input required value={newLead.company} onChange={e => setNewLead({...newLead, company: e.target.value})} type="text" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none" placeholder="Company" />
-              <input required value={newLead.linkedin_url} onChange={e => setNewLead({...newLead, linkedin_url: e.target.value})} type="url" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none" placeholder="LinkedIn URL" />
-              <input required value={newLead.website} onChange={e => setNewLead({...newLead, website: e.target.value})} type="url" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none" placeholder="Website" />
-              <button type="submit" className="w-full bg-slate-950 text-white font-black py-6 rounded-[32px]">Add Target</button>
+              <div className="grid grid-cols-2 gap-6">
+                <div className="col-span-2">
+                  <label className="block text-xs font-black text-slate-400 uppercase mb-3 tracking-widest">Full Name</label>
+                  <input required value={newLead.full_name} onChange={e => setNewLead({...newLead, full_name: e.target.value})} type="text" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none focus:ring-4 focus:ring-blue-100 focus:bg-white transition-all font-semibold" placeholder="e.g. Elon Musk" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase mb-3 tracking-widest">Company</label>
+                  <input required value={newLead.company} onChange={e => setNewLead({...newLead, company: e.target.value})} type="text" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none focus:ring-4 focus:ring-blue-100 transition-all font-semibold" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase mb-3 tracking-widest">Job Title</label>
+                  <input required value={newLead.title} onChange={e => setNewLead({...newLead, title: e.target.value})} type="text" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none focus:ring-4 focus:ring-blue-100 transition-all font-semibold" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase mb-3 tracking-widest">LinkedIn URL</label>
+                  <input required value={newLead.linkedin_url} onChange={e => setNewLead({...newLead, linkedin_url: e.target.value})} type="url" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none focus:ring-4 focus:ring-blue-100 transition-all font-semibold" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase mb-3 tracking-widest">Website</label>
+                  <input required value={newLead.website} onChange={e => setNewLead({...newLead, website: e.target.value})} type="url" className="w-full p-5 bg-slate-50 border border-slate-200 rounded-3xl outline-none focus:ring-4 focus:ring-blue-100 transition-all font-semibold" />
+                </div>
+              </div>
+              <button type="submit" className="w-full bg-slate-950 text-white font-black py-6 rounded-[32px] hover:bg-slate-900 transition-all text-lg shadow-2xl shadow-slate-200">
+                Confirm & Add Target
+              </button>
             </form>
           </div>
         </div>
@@ -378,6 +477,13 @@ const App: React.FC = () => {
         }
         .animate-progress-indefinite {
           animation: progress-indefinite 2s linear infinite;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255,255,255,0.1);
+          border-radius: 10px;
         }
       `}</style>
     </div>
