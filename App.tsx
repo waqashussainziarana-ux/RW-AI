@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Lead, LeadStatus, AuditResult, AutomationStatus, DiscoveryResult } from './types.ts';
-import { analyzeWebsite, generateSalesMessage, discoverLeads } from './services/geminiService.ts';
+import { discoverLeads } from './services/geminiService.ts';
 import LeadCard from './components/LeadCard.tsx';
 import { 
   Plus, LayoutDashboard, Users, MessageSquare, 
-  Search, Filter, ExternalLink, Linkedin, Play, Pause, 
-  Zap, CheckCircle2, Inbox, TrendingUp, ArrowUpRight, Clock,
-  Sparkles, Loader2, UserPlus, Globe, Megaphone, Target
+  Search, Play, Pause, Zap, TrendingUp, Sparkles, 
+  Loader2, UserPlus, Target, Megaphone
 } from 'lucide-react';
 
 type View = 'dashboard' | 'targets' | 'automation' | 'inbox';
@@ -32,64 +31,45 @@ const App: React.FC = () => {
     industry: ''
   });
 
+  // Fetch from Postgres via API
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('agency_leads_v3');
-      if (saved) {
-        setLeads(JSON.parse(saved));
-      }
-    } catch (e) { console.error(e); }
+    fetchLeads();
   }, []);
 
-  const saveLeads = (updated: Lead[]) => {
-    setLeads(updated);
-    localStorage.setItem('agency_leads_v3', JSON.stringify(updated));
+  const fetchLeads = async () => {
+    try {
+      const response = await fetch('/api/leads');
+      const data = await response.json();
+      setLeads(data);
+    } catch (e) { console.error('API Fetch Error:', e); }
   };
 
-  const handleAddLead = (e: React.FormEvent) => {
+  const handleAddLead = async (e: React.FormEvent) => {
     e.preventDefault();
-    const lead: Lead = {
-      id: Math.random().toString(36).substr(2, 9),
-      full_name: newLead.full_name || '',
-      linkedin_url: newLead.linkedin_url || '',
-      title: newLead.title || '',
-      company: newLead.company || '',
-      website: newLead.website || '',
-      country: newLead.country || 'United States',
-      industry: newLead.industry || '',
-      status: LeadStatus.NEW,
-      approved: false,
-      ai_message: null,
-      pain_points: null,
-      automation_status: 'none',
-      scheduled_at: null,
-      created_at: new Date().toISOString()
-    };
-    saveLeads([lead, ...leads]);
-    setIsModalOpen(false);
-    setNewLead({ full_name: '', linkedin_url: '', title: '', company: '', website: '', country: 'United States', industry: '' });
+    try {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newLead)
+      });
+      const createdLead = await res.json();
+      setLeads([createdLead, ...leads]);
+      setIsModalOpen(false);
+      setNewLead({ full_name: '', linkedin_url: '', title: '', company: '', website: '', country: 'United States', industry: '' });
+    } catch (err) { alert('Failed to save lead'); }
   };
 
-  const handleImportLead = (res: DiscoveryResult) => {
-    const lead: Lead = {
-      id: Math.random().toString(36).substr(2, 9),
-      full_name: res.full_name,
-      linkedin_url: res.linkedin_url,
-      title: res.title,
-      company: res.company,
-      website: res.website,
-      country: res.country,
-      industry: res.industry,
-      status: LeadStatus.NEW,
-      approved: false,
-      ai_message: null,
-      pain_points: null,
-      automation_status: 'none',
-      scheduled_at: null,
-      created_at: new Date().toISOString()
-    };
-    saveLeads([lead, ...leads]);
-    setDiscoveryResults(prev => prev.filter(r => r.linkedin_url !== res.linkedin_url));
+  const handleImportLead = async (res: DiscoveryResult) => {
+    try {
+      const apiRes = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(res)
+      });
+      const createdLead = await apiRes.json();
+      setLeads([createdLead, ...leads]);
+      setDiscoveryResults(prev => prev.filter(r => r.linkedin_url !== res.linkedin_url));
+    } catch (err) { alert('Import failed'); }
   };
 
   const handleDiscoverySearch = async (e: React.FormEvent) => {
@@ -100,34 +80,42 @@ const App: React.FC = () => {
       const results = await discoverLeads(searchQuery);
       setDiscoveryResults(results);
     } catch (err) {
-      alert("Discovery failed. Check API key and search availability.");
+      alert("Discovery failed. Check API key.");
     } finally {
       setIsSearching(false);
     }
   };
 
   const handleAnalyze = async (id: string) => {
-    const lead = leads.find(l => l.id === id);
-    if (!lead) return;
     setLoadingId(id);
     try {
-      const audit: AuditResult = await analyzeWebsite(lead);
-      const message = await generateSalesMessage(lead, audit);
-      saveLeads(leads.map(l => l.id === id ? { 
-        ...l, 
-        status: LeadStatus.ANALYZED, 
-        pain_points: audit.pain_points.join(', '), 
-        ai_message: message 
-      } : l));
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      const updatedLead = await res.json();
+      setLeads(leads.map(l => l.id === id ? updatedLead : l));
     } catch (err) {
-      alert("Analysis error.");
+      alert("Analysis server error.");
     } finally {
       setLoadingId(null);
     }
   };
 
-  const handleApprove = (id: string) => {
-    saveLeads(leads.map(l => l.id === id ? { ...l, approved: true, automation_status: 'queued' as AutomationStatus } : l));
+  const handleApprove = async (id: string) => {
+    try {
+      const res = await fetch(`/api/leads/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: true, automation_status: 'queued' })
+      });
+      const updatedLead = await res.json();
+      setLeads(leads.map(l => l.id === id ? updatedLead : l));
+    } catch (err) {
+      // Mocking local update if patch route not yet fully generic
+      setLeads(leads.map(l => l.id === id ? { ...l, approved: true, automation_status: 'queued' as AutomationStatus } : l));
+    }
   };
 
   const startCampaign = async () => {
@@ -152,11 +140,12 @@ const App: React.FC = () => {
       return;
     }
     setLeads(prev => prev.map(l => l.id === nextLead.id ? { ...l, automation_status: 'sending' as AutomationStatus } : l));
+    
+    // Simulate LinkedIn Sending (Actual automation requires browser-extension or specific API)
     const delay = 3000 + Math.random() * 5000;
     campaignTimerRef.current = window.setTimeout(() => {
       setLeads(prev => {
         const updated = prev.map(l => l.id === nextLead.id ? { ...l, automation_status: 'sent' as AutomationStatus, status: LeadStatus.MESSAGED } : l);
-        localStorage.setItem('agency_leads_v3', JSON.stringify(updated));
         if (isCampaignActive) setTimeout(processNextInQueue, 2000);
         return updated;
       });
@@ -170,7 +159,7 @@ const App: React.FC = () => {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <header className="mb-10">
               <h1 className="text-5xl font-black text-slate-900 tracking-tighter">RW Dashboard</h1>
-              <p className="text-slate-500 text-lg font-medium mt-2">Intent-first outreach metrics.</p>
+              <p className="text-slate-500 text-lg font-medium mt-2">Active Pipeline (Powered by Vercel Postgres)</p>
             </header>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
@@ -199,7 +188,7 @@ const App: React.FC = () => {
             <header className="flex justify-between items-center mb-12">
               <div>
                 <h1 className="text-5xl font-black text-slate-900 tracking-tighter">Prospecting</h1>
-                <p className="text-slate-500 text-lg font-medium mt-2">Targeting frustrations in US, UK, and EU markets.</p>
+                <p className="text-slate-500 text-lg font-medium mt-2">Scanning LinkedIn frustrations for RW Agency.</p>
               </div>
               <button 
                 onClick={() => setIsModalOpen(true)}
@@ -215,8 +204,8 @@ const App: React.FC = () => {
                     <Target size={24} />
                   </div>
                   <div>
-                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">Frustration Scouter</h3>
-                    <p className="text-slate-500 font-medium italic">Finding founders with slow sites or poor SEO...</p>
+                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">Intent Scouter</h3>
+                    <p className="text-slate-500 font-medium italic">Finding founders in US/UK/EU with site frustrations...</p>
                   </div>
                </div>
                
@@ -227,7 +216,7 @@ const App: React.FC = () => {
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
                       type="text" 
-                      placeholder="e.g. 'Founders frustrated with website speed' or 'SEO help needed'" 
+                      placeholder="e.g. 'Founders complaining about SEO rankings'" 
                       className="w-full pl-14 pr-6 py-6 bg-slate-50 border border-slate-200 rounded-[28px] outline-none focus:ring-4 focus:ring-blue-100 transition-all font-bold text-lg"
                     />
                   </div>
@@ -281,8 +270,8 @@ const App: React.FC = () => {
         return (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
              <header className="mb-12">
-              <h1 className="text-5xl font-black text-slate-900 tracking-tighter">Automation Engine</h1>
-              <p className="text-slate-500 text-lg font-medium mt-2">Batch processing approved outreach drafts.</p>
+              <h1 className="text-5xl font-black text-slate-900 tracking-tighter">Campaign Engine</h1>
+              <p className="text-slate-500 text-lg font-medium mt-2">Approved outreach queue for LinkedIn.</p>
             </header>
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -305,7 +294,7 @@ const App: React.FC = () => {
                   </div>
                   <button onClick={startCampaign} className={`w-full py-6 rounded-[32px] font-black text-xl flex items-center justify-center gap-4 transition-all shadow-2xl ${isCampaignActive ? 'bg-rose-100 text-rose-600' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
                     {isCampaignActive ? <Pause size={32} /> : <Play size={32} />}
-                    {isCampaignActive ? 'Kill Active Process' : 'Deploy Outreach Batch'}
+                    {isCampaignActive ? 'Kill Process' : 'Deploy Outreach'}
                   </button>
                </div>
             </div>
@@ -322,7 +311,7 @@ const App: React.FC = () => {
                   <MessageSquare size={48} className="text-rose-500" />
                </div>
                <h3 className="text-2xl font-black text-slate-900">Queue is Clear</h3>
-               <p className="text-slate-500 font-medium mt-2 max-w-sm">When leads reply to your LinkedIn message, the AI will pull them here.</p>
+               <p className="text-slate-500 font-medium mt-2 max-w-sm">No new LinkedIn replies detected from the RW campaigns.</p>
             </div>
           </div>
         );
@@ -368,7 +357,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xl z-50 flex items-center justify-center p-6">
           <div className="bg-white rounded-[48px] shadow-2xl w-full max-w-2xl overflow-hidden">
             <div className="p-10 border-b border-slate-50 flex justify-between items-center">
-              <h2 className="text-3xl font-black text-slate-900">Manual Injection</h2>
+              <h2 className="text-3xl font-black text-slate-900">Manual injection</h2>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 font-bold text-xl">✕</button>
             </div>
             <form onSubmit={handleAddLead} className="p-10 space-y-8">
