@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { Lead, AuditResult, DiscoveryResult } from "../types";
+import { Lead, AuditResult, DiscoveryResult } from "../types.ts";
 
 // Initialize the Gemini client
 const getAIClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY as string });

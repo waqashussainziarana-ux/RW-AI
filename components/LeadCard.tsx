@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { Lead, LeadStatus } from '../types';
+import { Lead, LeadStatus } from '../types.ts';
 import { Globe, Linkedin, CheckCircle, Clock, Search, Send, Loader2, AlertCircle } from 'lucide-react';
 
 interface LeadCardProps {
