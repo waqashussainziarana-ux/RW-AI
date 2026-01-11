@@ -1,7 +1,6 @@
-
 import React from 'react';
-import { Lead, LeadStatus } from '../types';
-import { Globe, Linkedin, CheckCircle, Clock, Search, Send, Loader2, AlertCircle } from 'lucide-react';
+import { Lead, LeadStatus } from '../types.ts';
+import { Globe, Linkedin, CheckCircle, Search, Loader2 } from 'lucide-react';
 
 interface LeadCardProps {
   lead: Lead;
@@ -44,16 +43,6 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, onAnalyze, onApprove, loading
           <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${getStatusColor(lead.status)}`}>
             {lead.status}
           </span>
-          {lead.automation_status !== 'none' && (
-            <span className={`text-[9px] font-bold uppercase tracking-tighter flex items-center gap-1 ${
-              lead.automation_status === 'queued' ? 'text-blue-500' : 
-              lead.automation_status === 'sending' ? 'text-orange-500 animate-pulse' : 
-              lead.automation_status === 'sent' ? 'text-emerald-500' : 'text-slate-400'
-            }`}>
-              {lead.automation_status === 'sending' && <Loader2 size={10} className="animate-spin" />}
-              Auto: {lead.automation_status}
-            </span>
-          )}
         </div>
       </div>
 
@@ -76,15 +65,10 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, onAnalyze, onApprove, loading
       )}
 
       {lead.ai_message && (
-        <div className="mb-6 group/msg relative">
+        <div className="mb-6">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Outreach Message Draft</p>
           <div className={`p-4 rounded-2xl border transition-all ${lead.approved ? 'bg-emerald-50/50 border-emerald-100 text-emerald-900' : 'bg-blue-50/30 border-blue-50 text-slate-800'} text-sm leading-relaxed relative`}>
              <span className="relative z-10">{lead.ai_message}</span>
-             {lead.approved && !isProcessing && (
-                <div className="absolute -top-2 -right-2 w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg">
-                   <CheckCircle size={14} />
-                </div>
-             )}
           </div>
         </div>
       )}
@@ -94,17 +78,17 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, onAnalyze, onApprove, loading
           <button
             onClick={() => onAnalyze(lead.id)}
             disabled={loading}
-            className="flex-1 bg-slate-900 text-white text-sm font-black py-4 rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center disabled:opacity-50 active:scale-95"
+            className="flex-1 bg-slate-900 text-white text-sm font-black py-4 rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center disabled:opacity-50"
           >
             {loading ? <Loader2 size={18} className="animate-spin mr-2" /> : <Search size={18} className="mr-2" />}
-            {loading ? 'Analyzing Site...' : 'Run SEO Audit'}
+            {loading ? 'Analyzing...' : 'Run SEO Audit'}
           </button>
         )}
         
         {lead.status === LeadStatus.ANALYZED && !lead.approved && (
           <button
             onClick={() => onApprove(lead.id)}
-            className="flex-1 bg-emerald-600 text-white text-sm font-black py-4 rounded-2xl hover:bg-emerald-700 transition-all flex items-center justify-center shadow-lg shadow-emerald-100 active:scale-95"
+            className="flex-1 bg-emerald-600 text-white text-sm font-black py-4 rounded-2xl hover:bg-emerald-700 transition-all flex items-center justify-center shadow-lg shadow-emerald-100"
           >
             <CheckCircle size={18} className="mr-2" />
             Approve & Queue
