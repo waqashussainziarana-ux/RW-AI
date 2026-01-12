@@ -2,7 +2,8 @@
   "version": 2,
   "public": true,
   "framework": null,
-  "installCommand": "echo 'Skipping install - browser-native ESM mode active'",
-  "buildCommand": "echo 'Skipping build - browser-native ESM mode active'",
+  "installCommand": "true",
+  "buildCommand": "true",
+  "outputDirectory": ".",
   "cleanUrls": true
 }
