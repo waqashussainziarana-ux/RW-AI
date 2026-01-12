@@ -1,9 +1,11 @@
 {
   "version": 2,
   "public": true,
-  "framework": null,
   "installCommand": "true",
   "buildCommand": "true",
   "outputDirectory": ".",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
