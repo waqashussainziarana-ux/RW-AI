@@ -15,13 +15,11 @@
         window.process.browser = true;
         window.process.nextTick = (cb) => setTimeout(cb, 0);
         
-        // The API_KEY is assumed to be injected by the environment.
-        // If not present, we initialize it to avoid ReferenceErrors.
+        // Ensure API_KEY is at least an empty string to prevent crashes during SDK init
         if (typeof window.process.env.API_KEY === 'undefined') {
             window.process.env.API_KEY = "";
         }
         
-        // Expose process globally for non-module scripts if needed
         var process = window.process;
     </script>
     <script type="importmap">
