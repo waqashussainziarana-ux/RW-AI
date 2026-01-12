@@ -1,7 +1,8 @@
 {
   "version": 2,
   "public": true,
-  "installCommand": "echo 'Skipping npm install - using browser-native ESM'",
-  "buildCommand": "echo 'Skipping build - using browser-native ESM'",
+  "framework": null,
+  "installCommand": "echo 'Skipping install - browser-native ESM mode active'",
+  "buildCommand": "echo 'Skipping build - browser-native ESM mode active'",
   "cleanUrls": true
 }

@@ -8,11 +8,10 @@
     <script>
         /**
          * Critical: Polyfill 'process' before any modules load.
-         * Many ESM packages (like @google/genai) expect a global process object.
+         * The @google/genai SDK expects a global process object for environment variables.
          */
         window.process = {
             env: { 
-                // The actual API key is injected by the platform environment at runtime
                 API_KEY: "" 
             },
             nextTick: (cb) => setTimeout(cb, 0),
